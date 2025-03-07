@@ -28,10 +28,7 @@ public class UserController {
     @PostMapping
     public User create(@RequestBody User user) {
         validateUser(user);
-
-        if (user.getName() == null || user.getName().isBlank()) {
-            user.setName(user.getLogin());
-        }
+        assignNameToLoginIfEmpty(user);
 
         user.setId(++currentId);
         users.put(user.getId(), user);
@@ -47,9 +44,7 @@ public class UserController {
             log.error("Attempt to update non-existent user. ID: {}", updatedUser.getId());
             throw new ValidationException("User with ID " + updatedUser.getId() + " not found.");
         }
-        if (updatedUser.getName() == null || updatedUser.getName().isBlank()) {
-            updatedUser.setName(updatedUser.getLogin());
-        }
+        assignNameToLoginIfEmpty(updatedUser);
 
         users.put(updatedUser.getId(), updatedUser);
         log.info("User updated successfully. ID: {}", updatedUser.getId());
@@ -70,6 +65,12 @@ public class UserController {
         if (user.getBirthday() == null || user.getBirthday().isBefore(MIN_BIRTHDATE) || user.getBirthday().isAfter(LocalDate.now())) {
             log.error("User birthday validation failed. Birthday: {}", user.getBirthday());
             throw new ValidationException("Birthday cannot be null, before " + MIN_BIRTHDATE + ", or in the future.");
+        }
+    }
+
+    private void assignNameToLoginIfEmpty(User user) {
+        if (user.getName() == null || user.getName().isBlank()) {
+            user.setName(user.getLogin());
         }
     }
 }

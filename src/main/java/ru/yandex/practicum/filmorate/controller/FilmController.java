@@ -54,7 +54,7 @@ public class FilmController {
             throw new ValidationException("Film name cannot be blank.");
         }
 
-        if (film.getDescription() == null || film.getDescription().length() > 200) {
+        if (film.getDescription() != null && film.getDescription().length() > 200) {
             log.error("Film description validation failed. Description length: {}", film.getDescription() == null ? "null" : film.getDescription().length());
             throw new ValidationException("Film description cannot be null or exceed 200 characters.");
         }

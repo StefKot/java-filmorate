@@ -60,12 +60,11 @@ class FilmControllerValidationTests {
     }
 
     @Test
-    void createFilm_whenDescriptionIsNull_shouldThrowValidationException() {
+    void createFilm_whenDescriptionIsNull_shouldCreateFilmSuccessfully() {
         validFilm.setDescription(null);
-        ValidationException exception = assertThrows(ValidationException.class, () -> filmController.create(validFilm),
-                "Creating a film with null description should throw ValidationException"
-        );
-        assertEquals("Film description cannot be null or exceed 200 characters.", exception.getMessage());
+        Film createdFilm = filmController.create(validFilm);
+        assertNotNull(createdFilm.getId());
+        assertNull(createdFilm.getDescription());
     }
 
     @Test
