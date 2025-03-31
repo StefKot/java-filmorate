@@ -23,8 +23,7 @@ public class FilmService {
     private final UserStorage userStorage;
 
     public void addLike(int filmId, int userId) {
-        getFilmById(filmId);
-        userStorage.getUserById(userId).orElseThrow(() -> new NotFoundException("User with ID " + userId + " not found"));
+        checkUserExists(userId);
         Film film = getFilmById(filmId);
         film.addLike(userId);
         filmStorage.update(film);
@@ -32,9 +31,7 @@ public class FilmService {
     }
 
     public void removeLike(int filmId, int userId) {
-        getFilmById(filmId);
-        userStorage.getUserById(userId).orElseThrow(() -> new NotFoundException("User with ID " + userId + " not found"));
-
+        checkUserExists(userId);
         Film film = getFilmById(filmId);
         film.removeLike(userId);
         filmStorage.update(film);
@@ -47,7 +44,10 @@ public class FilmService {
             throw new ValidationException("Count must be greater than 0");
         }
         log.info("Getting {} popular films", count);
-        return filmStorage.getAllFilms().stream().sorted(Comparator.<Film>comparingInt(film -> film.getLikeScore().size()).reversed()).limit(count).collect(Collectors.toList());
+        return filmStorage.getAllFilms().stream()
+                .sorted(Comparator.<Film>comparingInt(film -> film.getLikeScore().size()).reversed())
+                .limit(count)
+                .collect(Collectors.toList());
     }
 
     public Collection<Film> getAllFilms() {
@@ -77,17 +77,22 @@ public class FilmService {
         });
     }
 
+    private void checkUserExists(int userId) {
+        userStorage.getUserById(userId).orElseThrow(() -> {
+            log.error("User with ID {} not found during like operation", userId);
+            return new NotFoundException("User with ID " + userId + " not found");
+        });
+    }
+
     private void validateFilm(Film film) {
         if (film == null) {
             log.error("Provided null film");
             throw new ValidationException("Film cannot be null");
         }
-
         if (film.getName() == null || film.getName().isEmpty()) {
             log.error("Empty film name");
             throw new ValidationException("Film name cannot be empty");
         }
-
         if (film.getDescription() == null || film.getDescription().length() > 200) {
             log.error("Invalid film description");
             throw new ValidationException("Film description length should be up to 200 characters");
