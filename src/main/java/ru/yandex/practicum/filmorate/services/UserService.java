@@ -1,136 +1,79 @@
 package ru.yandex.practicum.filmorate.services;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import ru.yandex.practicum.filmorate.exceptions.FriendsException;
+import org.springframework.transaction.annotation.Transactional;
+import ru.yandex.practicum.filmorate.exceptions.ContentNotException;
 import ru.yandex.practicum.filmorate.exceptions.NotFoundException;
 import ru.yandex.practicum.filmorate.exceptions.ValidationException;
 import ru.yandex.practicum.filmorate.model.User;
 import ru.yandex.practicum.filmorate.storage.interfaces.UserStorage;
 
-import java.time.LocalDate;
 import java.util.Collection;
-import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserService {
+
     private final UserStorage userStorage;
 
-    public void addFriend(int userId, int friendId) {
-        if (userId == friendId) {
-            log.error("Attempt to add self as a friend: userId={}, friendId={}", userId, friendId);
-            throw new FriendsException("Cannot add/remove self as a friend");
+    @Autowired
+    public UserService(@Qualifier("userDbStorage") UserStorage userStorage) {
+        this.userStorage = userStorage;
+    }
+
+    @Transactional
+    public User addFriends(int userId1, int userId2) {
+        User user1 = userStorage.getUserById(userId1).orElseThrow(() -> new NotFoundException("User not found"));
+        User user2 = userStorage.getUserById(userId2).orElseThrow(() -> new NotFoundException("User not found"));
+
+        if (user1.getFriends().contains(user2)) {
+            throw new ValidationException("User " + user2.getId() + " is already added as a friend");
         }
 
-        User user = getUserById(userId);
-        User friend = getUserById(friendId);
-
-        user.addFriend(friendId);
-        friend.addFriend(userId);
-        userStorage.update(user);
-        userStorage.update(friend);
-        log.info("User {} added user {} as a friend", userId, friendId);
+        userStorage.addFriend(userId1, userId2);
+        user1.getFriends().add(user2);
+        return user1;
     }
 
-    public void deleteFriend(int userId, int friendId) {
-        if (userId == friendId) {
-            log.error("Attempt to remove self as a friend: userId={}, friendId={}", userId, friendId);
-            throw new FriendsException("Cannot add/remove self as a friend");
+    @Transactional
+    public User deleteFriends(int userId1, int userId2) {
+        User user1 = userStorage.getUserById(userId1).orElseThrow(() -> new NotFoundException("User not found"));
+        User user2 = userStorage.getUserById(userId2).orElseThrow(() -> new NotFoundException("User not found"));
+
+        if (!user1.getFriends().contains(user2)) {
+            throw new ContentNotException("User " + user2.getId() + " not found in the friends list");
         }
 
-        User user = getUserById(userId);
-        User friend = getUserById(friendId);
-
-        user.removeFriend(friendId);
-        friend.removeFriend(userId);
-        userStorage.update(user);
-        userStorage.update(friend);
-        log.info("User {} removed user {} from friends", userId, friendId);
+        userStorage.removeFriend(userId1, userId2);
+        user1.getFriends().remove(user2);
+        return user1;
     }
 
-    public Set<User> getMutualFriends(int userId, int otherId) {
-        User user1 = getUserById(userId);
-        User user2 = getUserById(otherId);
-
-        log.info("Getting mutual friends of users {} and {}", userId, otherId);
-        return user1.getFriendsList().stream()
-                .filter(user2.getFriendsList()::contains)
-                .map(userStorage::getUserById)
-                .flatMap(Optional::stream)
-                .collect(Collectors.toSet());
+    public Set<User> getCommonFriends(int userId1, int userId2) {
+        userStorage.getUserById(userId1).orElseThrow(() -> new NotFoundException("User not found"));
+        userStorage.getUserById(userId2).orElseThrow(() -> new NotFoundException("User not found"));
+        return userStorage.getCommonFriends(userId1, userId2);
     }
 
-    public Set<User> getFriends(int userId) {
-        User user = getUserById(userId);
-        log.info("Getting friends list for user {}", userId);
-        return user.getFriendsList().stream()
-                .map(userStorage::getUserById)
-                .flatMap(Optional::stream)
-                .collect(Collectors.toSet());
+    public User addUser(User user) {
+        return userStorage.addUser(user);
     }
 
-    public Collection<User> getAllUsers() {
-        log.info("Getting all users");
-        return userStorage.getAllUsers();
+    public User updateUser(User user) {
+        return userStorage.updateUser(user);
     }
 
-    public User create(User user) {
-        validateUser(user);
-        User createdUser = userStorage.create(user);
-        log.info("Created user with ID: {}", createdUser.getId());
-        return createdUser;
+    public Collection<User> getUsers() {
+        return userStorage.getUsers();
     }
 
-    public User update(User user) {
-        getUserById(user.getId());
-        validateUser(user);
-        User updatedUser = userStorage.update(user);
-        log.info("Updated user with ID: {}", updatedUser.getId());
-        return updatedUser;
-    }
-
-
-    private User getUserById(int userId) {
-        return userStorage.getUserById(userId).orElseThrow(() -> {
-            log.error("User with ID {} not found", userId);
-            return new NotFoundException("User with ID " + userId + " not found");
-        });
-    }
-
-    private void validateUser(User user) {
-        if (user == null) {
-            log.error("Null user provided");
-            throw new ValidationException("User cannot be null");
-        }
-        if (!isValidEmail(user.getEmail())) {
-            log.error("Invalid email: {}", user.getEmail());
-            throw new ValidationException("Invalid email");
-        }
-        if (!isValidLogin(user.getLogin())) {
-            log.error("Invalid login: {}", user.getLogin());
-            throw new ValidationException("Invalid login");
-        }
-        if (!isValidBirthday(user.getBirthday())) {
-            log.error("Invalid birthday: {}", user.getBirthday());
-            throw new ValidationException("Invalid birthday");
-        }
-    }
-
-
-    private boolean isValidEmail(String email) {
-        return email != null && email.contains("@");
-    }
-
-    private boolean isValidLogin(String login) {
-        return login != null && !login.contains(" ");
-    }
-
-    private boolean isValidBirthday(LocalDate birthday) {
-        return birthday != null && birthday.isBefore(LocalDate.now());
+    public Collection<User> getFriends(int id) {
+        User user = userStorage.getUserById(id)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        return user.getFriends();
     }
 }

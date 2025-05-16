@@ -1,108 +1,151 @@
 package ru.yandex.practicum.filmorate.services;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import ru.yandex.practicum.filmorate.exceptions.ContentNotException;
 import ru.yandex.practicum.filmorate.exceptions.NotFoundException;
 import ru.yandex.practicum.filmorate.exceptions.ValidationException;
 import ru.yandex.practicum.filmorate.model.Film;
+import ru.yandex.practicum.filmorate.model.Genre;
+import ru.yandex.practicum.filmorate.model.MPA;
+import ru.yandex.practicum.filmorate.model.User;
+import ru.yandex.practicum.filmorate.storage.FilmDbStorage;
+import ru.yandex.practicum.filmorate.storage.GenreDbStorage;
+import ru.yandex.practicum.filmorate.storage.MpaDbStorage;
 import ru.yandex.practicum.filmorate.storage.interfaces.FilmStorage;
 import ru.yandex.practicum.filmorate.storage.interfaces.UserStorage;
 
-import java.time.LocalDate;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class FilmService {
+
     private final FilmStorage filmStorage;
     private final UserStorage userStorage;
+    private final FilmDbStorage filmDbStorage;
+    private final GenreDbStorage genreDbStorage;
+    private final MpaDbStorage mpaDbStorage;
 
-    public void addLike(int filmId, int userId) {
-        checkUserExists(userId);
-        Film film = getFilmById(filmId);
-        film.addLike(userId);
-        filmStorage.update(film);
-        log.info("User {} liked film {}", userId, filmId);
-    }
-
-    public void removeLike(int filmId, int userId) {
-        checkUserExists(userId);
-        Film film = getFilmById(filmId);
-        film.removeLike(userId);
-        filmStorage.update(film);
-        log.info("User {} removed like from film {}", userId, filmId);
-    }
-
-    public List<Film> getPopularFilms(int count) {
-        if (count <= 0) {
-            log.error("Invalid count value: {}", count);
-            throw new ValidationException("Count must be greater than 0");
-        }
-        log.info("Getting {} popular films", count);
-        return filmStorage.getAllFilms().stream()
-                .sorted(Comparator.<Film>comparingInt(film -> film.getLikeScore().size()).reversed())
-                .limit(count)
-                .collect(Collectors.toList());
-    }
-
-    public Collection<Film> getAllFilms() {
-        log.info("Getting all films");
-        return filmStorage.getAllFilms();
+    @Autowired
+    public FilmService(@Qualifier("filmDbStorage") FilmStorage filmStorage,
+                       @Qualifier("userDbStorage") UserStorage userStorage,
+                       @Qualifier("filmDbStorage") FilmDbStorage filmDbStorage,
+                       GenreDbStorage genreDbStorage,
+                       MpaDbStorage mpaDbStorage) {
+        this.filmStorage = filmStorage;
+        this.userStorage = userStorage;
+        this.filmDbStorage = filmDbStorage;
+        this.genreDbStorage = genreDbStorage;
+        this.mpaDbStorage = mpaDbStorage;
     }
 
     public Film create(Film film) {
-        validateFilm(film);
-        Film createdFilm = filmStorage.create(film);
-        log.info("Created film with ID: {}", createdFilm.getId());
-        return createdFilm;
+        validate(film);
+        return filmStorage.addFilm(film);
+    }
+
+    public Collection<Film> getFilms() {
+        return filmStorage.getFilms();
+    }
+
+    public Optional<Film> getFilmById(int filmId) {
+        return filmStorage.getFilmById(filmId);
     }
 
     public Film update(Film film) {
-        validateFilm(film);
-        getFilmById(film.getId());
-        Film updatedFilm = filmStorage.update(film);
-        log.info("Updated film with ID: {}", updatedFilm.getId());
-        return updatedFilm;
-    }
+        validate(film);
+        filmStorage.getFilmById(film.getId())
+                .orElseThrow(() -> new NotFoundException("Film not found"));
 
-    private Film getFilmById(int filmId) {
-        return filmStorage.getFilmById(filmId).orElseThrow(() -> {
-            log.error("Film with ID {} not found", filmId);
-            return new NotFoundException("Film with ID " + filmId + " not found");
-        });
-    }
-
-    private void checkUserExists(int userId) {
-        userStorage.getUserById(userId).orElseThrow(() -> {
-            log.error("User with ID {} not found during like operation", userId);
-            return new NotFoundException("User with ID " + userId + " not found");
-        });
-    }
-
-    private void validateFilm(Film film) {
-        if (film == null) {
-            log.error("Provided null film");
-            throw new ValidationException("Film cannot be null");
+        if (film.getMpa() != null) {
+            mpaDbStorage.getMpaById(film.getMpa().getId())
+                    .orElseThrow(() -> new NotFoundException("MPA not found"));
         }
-        if (film.getName() == null || film.getName().isEmpty()) {
-            log.error("Empty film name");
+        if (film.getGenres() != null && !film.getGenres().isEmpty()) {
+            Set<Integer> uniqueGenreIds = film.getGenres().stream()
+                    .map(Genre::getId)
+                    .collect(Collectors.toSet());
+            List<Genre> uniqueGenres = uniqueGenreIds.stream()
+                    .map(id -> genreDbStorage.getGenreById(id)
+                            .orElseThrow(() -> new NotFoundException("Genre not found")))
+                    .sorted(Comparator.comparing(Genre::getId))
+                    .toList();
+            film.setGenres(uniqueGenres);
+        }
+
+        return filmStorage.updateFilm(film);
+    }
+
+    public Film addLike(int filmId, int userId) {
+        Film film = filmStorage.getFilmById(filmId)
+                .orElseThrow(() -> new NotFoundException("Film not found"));
+        User user = userStorage.getUserById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        if (film.getLikes().contains(user)) {
+            throw new ValidationException("User " + user.getId() + " has already liked this film");
+        }
+
+        filmDbStorage.addLike(filmId, userId);
+        film.getLikes().add(user);
+        return film;
+    }
+
+    public Film deleteLike(int filmId, int userId) {
+        Film film = filmStorage.getFilmById(filmId)
+                .orElseThrow(() -> new NotFoundException("Film not found"));
+        User user = userStorage.getUserById(userId)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+
+        if (!film.getLikes().contains(user)) {
+            throw new ContentNotException("User " + user.getId() + " has not yet liked this film");
+        }
+
+        filmDbStorage.removeLike(filmId, userId);
+        film.getLikes().remove(user);
+        return film;
+    }
+
+    public List<Film> getTopFilms(int count) {
+        if (count <= 0) {
+            throw new ValidationException("The number of films must be positive");
+        }
+        return filmDbStorage.getTopFilms(count);
+    }
+
+    public Collection<Genre> getAllGenres() {
+        return genreDbStorage.getAllGenres();
+    }
+
+    public Genre getGenreById(int id) {
+        return genreDbStorage.getGenreById(id)
+                .orElseThrow(() -> new NotFoundException("Genre not found"));
+    }
+
+    public Collection<MPA> getAllMpa() {
+        return mpaDbStorage.getAllMpa();
+    }
+
+    public MPA getMpaById(int id) {
+        return mpaDbStorage.getMpaById(id)
+                .orElseThrow(() -> new NotFoundException("MPA not found"));
+    }
+
+    private void validate(Film film) {
+        if (film.getName() == null || film.getName().isBlank()) {
             throw new ValidationException("Film name cannot be empty");
         }
-        if (film.getDescription() == null || film.getDescription().length() > 200) {
-            log.error("Invalid film description");
-            throw new ValidationException("Film description length should be up to 200 characters");
+        if (film.getDescription() != null && film.getDescription().length() > 200) {
+            throw new ValidationException("Film description cannot exceed 200 characters");
         }
-        if (film.getReleaseDate() == null || film.getReleaseDate().isBefore(LocalDate.of(1895, 12, 28))) {
-            log.error("Invalid film release date");
-            throw new ValidationException("Film release date cannot be before December 28, 1895");
+        if (film.getReleaseDate() != null && film.getReleaseDate().isBefore(film.getMinReleaseDate())) {
+            throw new ValidationException("Release date cannot be earlier than " + film.getMinReleaseDate());
         }
         if (film.getDuration() <= 0) {
-            log.error("Invalid film duration");
             throw new ValidationException("Film duration must be positive");
         }
     }
