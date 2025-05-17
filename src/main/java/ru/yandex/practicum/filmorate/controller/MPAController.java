@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import ru.yandex.practicum.filmorate.model.MPA;
-import ru.yandex.practicum.filmorate.services.FilmService;
+import ru.yandex.practicum.filmorate.services.MPAService;
 
 import java.util.Collection;
 
@@ -14,22 +14,24 @@ import java.util.Collection;
 @Slf4j
 public class MPAController {
 
-    private final FilmService filmService;
+    private final MPAService mpaService;
 
     @Autowired
-    public MPAController(FilmService filmService) {
-        this.filmService = filmService;
+    public MPAController(MPAService mpaService) {
+        this.mpaService = mpaService;
     }
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
     public Collection<MPA> getAllMpa() {
-        return filmService.getAllMpa();
+        log.info("MPAController: Received GET /mpa request");
+        return mpaService.getAllMpa();
     }
 
     @GetMapping("/{id}")
     @ResponseStatus(HttpStatus.OK)
     public MPA getMpaById(@PathVariable int id) {
-        return filmService.getMpaById(id);
+        log.info("MPAController: Received GET /mpa/{} request", id);
+        return mpaService.getMpaById(id);
     }
 }
