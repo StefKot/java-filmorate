@@ -38,9 +38,9 @@ public class UserService {
         }
 
         userStorage.addFriend(userId1, userId2);
-        user1.getFriends().add(user2);
+        User updatedUser1 = findUserById(userId1);
         log.info("UserService: User {} and User {} are now friends", userId1, userId2);
-        return user1;
+        return updatedUser1;
     }
 
     @Transactional
@@ -55,9 +55,9 @@ public class UserService {
         }
 
         userStorage.removeFriend(userId1, userId2);
-        user1.getFriends().remove(user2);
+        User updatedUser1 = findUserById(userId1);
         log.info("UserService: User {} and User {} are no longer friends", userId1, userId2);
-        return user1;
+        return updatedUser1;
     }
 
     public Set<User> getCommonFriends(int userId1, int userId2) {

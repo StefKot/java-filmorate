@@ -158,14 +158,21 @@ public class UserDbStorage implements UserStorage {
         log.debug("Friend relation added: user {} -> friend {}", userId, friendId);
     }
 
-    public void removeFriend(int userId, int friendId) {
-        log.debug("Attempting to remove friend relation: user {} -> friend {}", userId, friendId);
-        String sql = "DELETE FROM user_friends WHERE user_id = ? AND friend_id = ?";
-        int rowsDeleted = jdbcTemplate.update(sql, userId, friendId);
-        if (rowsDeleted == 0) {
-            log.warn("Friend relation not found for removal: user {} -> friend {}", userId, friendId);
+    @Override
+    public void removeFriend(int userId1, int userId2) {
+        log.debug("Attempting to remove friend relation between {} and {}", userId1, userId2);
+        String sql1 = "DELETE FROM user_friends WHERE user_id = ? AND friend_id = ?";
+        int rowsDeleted1 = jdbcTemplate.update(sql1, userId1, userId2);
+
+        String sql2 = "DELETE FROM user_friends WHERE user_id = ? AND friend_id = ?";
+        int rowsDeleted2 = jdbcTemplate.update(sql2, userId2, userId1);
+
+        int totalRowsDeleted = rowsDeleted1 + rowsDeleted2;
+
+        if (totalRowsDeleted == 0) {
+            log.warn("No friend relations found for removal between {} and {}", userId1, userId2);
         } else {
-            log.debug("Friend relation removed: user {} -> friend {}", userId, friendId);
+            log.debug("Friend relations removed between {} and {}. Total rows deleted: {}", userId1, userId2, totalRowsDeleted);
         }
     }
 

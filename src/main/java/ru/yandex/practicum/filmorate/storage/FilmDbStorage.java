@@ -3,13 +3,10 @@ package ru.yandex.practicum.filmorate.storage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 import ru.yandex.practicum.filmorate.exceptions.NotFoundException;
-import ru.yandex.practicum.filmorate.exceptions.ValidationException;
 import ru.yandex.practicum.filmorate.model.Film;
 import ru.yandex.practicum.filmorate.model.Genre;
 import ru.yandex.practicum.filmorate.model.MPA;
@@ -21,6 +18,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.stream.Collectors;
+
 
 @Slf4j
 @Repository
@@ -42,7 +41,6 @@ public class FilmDbStorage implements FilmStorage {
     public Film addFilm(Film film) {
         log.debug("Attempting to add film: {}", film.getName());
 
-        validateFilmData(film);
 
         String sql = "INSERT INTO Films (name, description, releaseDate, mpa_id, duration) VALUES (?, ?, ?, ?, ?)";
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -60,20 +58,28 @@ public class FilmDbStorage implements FilmStorage {
         film.setId(filmId);
 
         if (film.getGenres() != null && !film.getGenres().isEmpty()) {
+            Set<Integer> uniqueGenreIds = film.getGenres().stream()
+                    .map(Genre::getId)
+                    .collect(Collectors.toSet());
+
             String genreSql = "INSERT INTO film_genres (film_id, genre_id) VALUES (?, ?)";
-            List<Object[]> batchArgs = film.getGenres().stream()
-                    .map(genre -> new Object[]{filmId, genre.getId()})
+            List<Object[]> batchArgs = uniqueGenreIds.stream()
+                    .map(genreId -> new Object[]{filmId, genreId})
                     .toList();
-            jdbcTemplate.batchUpdate(genreSql, batchArgs);
+            if (!batchArgs.isEmpty()) {
+                jdbcTemplate.batchUpdate(genreSql, batchArgs);
+            }
         }
 
         log.info("FilmDbStorage: Film created with id: {}", film.getId());
-        return film;
+
+        return getFilmById(filmId).orElseThrow(() -> new NotFoundException("Failed to retrieve added film"));
     }
 
     @Override
     public Film updateFilm(Film film) {
         log.debug("Attempting to update film with ID: {}", film.getId());
+
 
         String checkFilmSql = "SELECT COUNT(*) FROM Films WHERE id = ?";
         Integer filmCount = jdbcTemplate.queryForObject(checkFilmSql, Integer.class, film.getId());
@@ -81,9 +87,6 @@ public class FilmDbStorage implements FilmStorage {
             log.error("Film with ID {} not found for update", film.getId());
             throw new NotFoundException("Film not found");
         }
-
-        validateFilmData(film);
-
 
         String sql = "UPDATE Films SET name = ?, description = ?, releaseDate = ?, mpa_id = ?, duration = ? WHERE id = ?";
         jdbcTemplate.update(sql,
@@ -95,16 +98,24 @@ public class FilmDbStorage implements FilmStorage {
                 film.getId());
 
         jdbcTemplate.update("DELETE FROM film_genres WHERE film_id = ?", film.getId());
+
         if (film.getGenres() != null && !film.getGenres().isEmpty()) {
+            Set<Integer> uniqueGenreIds = film.getGenres().stream()
+                    .map(Genre::getId)
+                    .collect(Collectors.toSet());
+
             String genreSql = "INSERT INTO film_genres (film_id, genre_id) VALUES (?, ?)";
-            List<Object[]> batchArgs = film.getGenres().stream()
-                    .map(genre -> new Object[]{film.getId(), genre.getId()})
+            List<Object[]> batchArgs = uniqueGenreIds.stream()
+                    .map(genreId -> new Object[]{film.getId(), genreId})
                     .toList();
-            jdbcTemplate.batchUpdate(genreSql, batchArgs);
+            if (!batchArgs.isEmpty()) {
+                jdbcTemplate.batchUpdate(genreSql, batchArgs);
+            }
         }
 
         log.info("FilmDbStorage: Film updated with id: {}", film.getId());
-        return film;
+
+        return getFilmById(film.getId()).orElseThrow(() -> new NotFoundException("Failed to retrieve updated film"));
     }
 
     @Override
@@ -177,9 +188,7 @@ public class FilmDbStorage implements FilmStorage {
 
             filmMap.values().forEach(film -> {
                 if (film.getGenres() != null) {
-                    List<Genre> distinctGenres = new ArrayList<>(new HashSet<>(film.getGenres()));
-                    distinctGenres.sort(Comparator.comparing(Genre::getId));
-                    film.setGenres(distinctGenres);
+                    film.getGenres().sort(Comparator.comparing(Genre::getId));
                 }
             });
 
@@ -269,14 +278,12 @@ public class FilmDbStorage implements FilmStorage {
         String sql = "SELECT f.id AS film_id, f.name AS film_name, f.description, f.releaseDate, f.duration, " +
                 "m.id AS mpa_id, m.name AS mpa_name, " +
                 "g.id AS genre_id, g.name AS genre_name, " +
-                "fl.like_user_id, " +
-                "u.id AS like_user_id_full, u.login AS like_user_login, u.email AS like_user_email, u.name AS like_user_name, u.birthday AS like_user_birthday " +
+                "fl.like_user_id " +
                 "FROM Films f " +
                 "JOIN MPA m ON f.mpa_id = m.id " +
                 "LEFT JOIN film_genres fg ON f.id = fg.film_id " +
                 "LEFT JOIN Genres g ON fg.genre_id = g.id " +
                 "LEFT JOIN film_likes fl ON f.id = fl.film_id " +
-                "LEFT JOIN Users u ON fl.like_user_id = u.id " +
                 "WHERE f.id IN ( " +
                 "  SELECT f_top.id " +
                 "  FROM Films f_top " +
@@ -339,17 +346,7 @@ public class FilmDbStorage implements FilmStorage {
                 Integer likeUserId = rs.getInt("like_user_id");
                 if (!rs.wasNull()) {
                     User likeUser = new User();
-                    try {
-                        likeUser.setId(rs.getInt("like_user_id_full"));
-                        likeUser.setLogin(rs.getString("like_user_login"));
-                        likeUser.setEmail(rs.getString("like_user_email"));
-                        likeUser.setName(rs.getString("like_user_name"));
-                        Date birthdaySql = rs.getDate("like_user_birthday");
-                        likeUser.setBirthday(birthdaySql != null ? birthdaySql.toLocalDate() : null);
-                    } catch (SQLException e) {
-                        log.error("Error mapping user data from ResultSet for top film ID {}", filmId, e);
-                        throw new RuntimeException("Error mapping user data", e);
-                    }
+                    likeUser.setId(likeUserId);
                     film.getLikes().add(likeUser);
                 }
             }
@@ -358,9 +355,7 @@ public class FilmDbStorage implements FilmStorage {
 
             currentFilmMap.values().forEach(film -> {
                 if (film.getGenres() != null) {
-                    List<Genre> distinctGenres = new ArrayList<>(new HashSet<>(film.getGenres()));
-                    distinctGenres.sort(Comparator.comparing(Genre::getId));
-                    film.setGenres(distinctGenres);
+                    film.getGenres().sort(Comparator.comparing(Genre::getId));
                 }
             });
 
@@ -392,51 +387,6 @@ public class FilmDbStorage implements FilmStorage {
         boolean exists = count != null && count > 0;
         log.debug("FilmDbStorage: Like exists for film {} by user {}: {}", filmId, userId, exists);
         return exists;
-    }
-
-    private void validateFilmData(Film film) {
-        log.debug("FilmDbStorage: Validating film data for film: {}", film != null ? film.getName() : "null");
-
-        if (film == null) {
-            log.error("Validation failed: Film object is null");
-            throw new ValidationException("Film cannot be null");
-        }
-
-        if (film.getMpa() == null) {
-            log.error("Validation failed: MPA cannot be null for film {}", film.getName());
-            throw new ValidationException("MPA cannot be null");
-        }
-        int mpaId = film.getMpa().getId();
-        String checkMpaSql = "SELECT COUNT(*) FROM MPA WHERE id = ?";
-        Integer mpaCount = jdbcTemplate.queryForObject(checkMpaSql, Integer.class, mpaId);
-        if (mpaCount == null || mpaCount == 0) {
-            log.error("Validation failed: MPA with ID {} not found for film {}", mpaId, film.getName());
-            throw new NotFoundException("MPA not found");
-        }
-
-
-        if (film.getGenres() != null && !film.getGenres().isEmpty()) {
-            Set<Genre> uniqueGenres = new HashSet<>(film.getGenres());
-            film.setGenres(new ArrayList<>(uniqueGenres));
-
-            List<Integer> genreIds = film.getGenres().stream().map(Genre::getId).toList();
-
-            String checkGenresSql = "SELECT id FROM Genres WHERE id IN (:genreIds)";
-            MapSqlParameterSource parameters = new MapSqlParameterSource();
-            parameters.addValue("genreIds", genreIds);
-
-            NamedParameterJdbcTemplate namedParameterJdbcTemplate = new NamedParameterJdbcTemplate(jdbcTemplate);
-            List<Integer> existingGenreIds = namedParameterJdbcTemplate.queryForList(checkGenresSql, parameters, Integer.class);
-
-            if (existingGenreIds.size() != genreIds.size()) {
-                Set<Integer> missingGenres = new HashSet<>(genreIds);
-                existingGenreIds.forEach(missingGenres::remove);
-                log.error("Validation failed: Genres with IDs {} not found for film {}", missingGenres, film.getName());
-                throw new NotFoundException("Genres not found: " + missingGenres);
-            }
-            film.getGenres().sort(Comparator.comparing(Genre::getId));
-        }
-        log.debug("FilmDbStorage: Film data validation successful");
     }
 
     private User mapRowToUser(ResultSet rs, int rowNum) throws SQLException {

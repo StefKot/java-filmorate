@@ -17,11 +17,15 @@ import ru.yandex.practicum.filmorate.storage.interfaces.GenreStorage;
 import ru.yandex.practicum.filmorate.storage.interfaces.MPAStorage;
 import ru.yandex.practicum.filmorate.storage.interfaces.UserStorage;
 
+import java.time.LocalDate;
 import java.util.*;
 
 @Slf4j
 @Service
 public class FilmService {
+
+    private static final LocalDate MIN_RELEASE_DATE = LocalDate.of(1895, 12, 28);
+
 
     private final FilmStorage filmStorage;
     private final UserStorage userStorage;
@@ -49,14 +53,10 @@ public class FilmService {
         validate(film);
         Film createdFilm = filmStorage.addFilm(film);
 
-        List<Genre> genres = genreStorage.getGenresByFilmId(createdFilm.getId());
-        createdFilm.setGenres(genres);
-        if (createdFilm.getMpa() != null && (createdFilm.getMpa().getName() == null || createdFilm.getMpa().getName().isEmpty())) {
-            mpaStorage.getMpaById(createdFilm.getMpa().getId()).ifPresent(createdFilm::setMpa);
-        }
+        Film fullyCreatedFilm = findFilmById(createdFilm.getId());
 
-        log.info("FilmService: film created with ID: {}", createdFilm.getId());
-        return createdFilm;
+        log.info("FilmService: film created with ID: {}", fullyCreatedFilm.getId());
+        return fullyCreatedFilm;
     }
 
     public Collection<Film> getFilms() {
@@ -87,15 +87,10 @@ public class FilmService {
 
         Film updatedFilm = filmStorage.updateFilm(film);
 
-        List<Genre> updatedGenres = genreStorage.getGenresByFilmId(updatedFilm.getId());
-        updatedFilm.setGenres(updatedGenres);
-        if (updatedFilm.getMpa() != null && (updatedFilm.getMpa().getName() == null || updatedFilm.getMpa().getName().isEmpty())) {
-            mpaStorage.getMpaById(updatedFilm.getMpa().getId()).ifPresent(updatedFilm::setMpa);
-        }
-        log.debug("FilmService: Re-fetched {} genres for updated film ID {}", updatedGenres.size(), updatedFilm.getId());
+        Film fullyUpdatedFilm = findFilmById(updatedFilm.getId());
 
-        log.info("FilmService: Film with ID {} updated successfully", updatedFilm.getId());
-        return updatedFilm;
+        log.info("FilmService: Film with ID {} updated successfully", fullyUpdatedFilm.getId());
+        return fullyUpdatedFilm;
     }
 
     @Transactional
@@ -103,13 +98,6 @@ public class FilmService {
         log.info("FilmService: received request to add like to film ID {} by user ID {}", filmId, userId);
         Film film = findFilmById(filmId);
         User user = findUserById(userId);
-
-        List<Genre> genres = genreStorage.getGenresByFilmId(film.getId());
-        film.setGenres(genres);
-        if (film.getMpa() != null && (film.getMpa().getName() == null || film.getMpa().getName().isEmpty())) {
-            mpaStorage.getMpaById(film.getMpa().getId()).ifPresent(film::setMpa);
-        }
-        log.debug("FilmService: Enriched film ID {} before adding like", film.getId());
 
         if (filmDbStorage.checkLikeExists(filmId, userId)) {
             log.warn("FilmService: User {} already liked film {}", userId, filmId);
@@ -128,13 +116,6 @@ public class FilmService {
         log.info("FilmService: received request to delete like from film ID {} by user ID {}", filmId, userId);
         Film film = findFilmById(filmId);
         User user = findUserById(userId);
-
-        List<Genre> genres = genreStorage.getGenresByFilmId(film.getId());
-        film.setGenres(genres);
-        if (film.getMpa() != null && (film.getMpa().getName() == null || film.getMpa().getName().isEmpty())) {
-            mpaStorage.getMpaById(film.getMpa().getId()).ifPresent(film::setMpa);
-        }
-        log.debug("FilmService: Enriched film ID {} before deleting like", film.getId());
 
         boolean likeExistsInDb = filmDbStorage.checkLikeExists(filmId, userId);
         if (!likeExistsInDb) {
@@ -158,17 +139,6 @@ public class FilmService {
         }
         List<Film> topFilms = filmDbStorage.getTopFilms(count);
         log.info("FilmService: retrieved {} top films from storage (enriched)", topFilms.size());
-
-        for (Film film : topFilms) {
-            List<Genre> genres = genreStorage.getGenresByFilmId(film.getId());
-            film.setGenres(genres);
-            if (film.getMpa() != null && (film.getMpa().getName() == null || film.getMpa().getName().isEmpty())) {
-                mpaStorage.getMpaById(film.getMpa().getId()).ifPresent(film::setMpa);
-            }
-            log.debug("FilmService: Enriched top film ID {} with {} genres", film.getId(), genres.size());
-        }
-
-        log.info("FilmService: returning {} top films enriched with data", topFilms.size());
         return topFilms;
     }
 
@@ -183,9 +153,9 @@ public class FilmService {
             log.error("FilmService: Validation failed: Film description exceeds 200 characters");
             throw new ValidationException("Film description cannot exceed 200 characters");
         }
-        if (film.getReleaseDate() != null && film.getReleaseDate().isBefore(Film.MIN_RELEASE_DATE)) {
-            log.error("FilmService: Validation failed: Release date {} is before {}", film.getReleaseDate(), Film.MIN_RELEASE_DATE);
-            throw new ValidationException("Release date cannot be earlier than " + Film.MIN_RELEASE_DATE);
+        if (film.getReleaseDate() != null && film.getReleaseDate().isBefore(MIN_RELEASE_DATE)) {
+            log.error("FilmService: Validation failed: Release date {} is before {}", film.getReleaseDate(), MIN_RELEASE_DATE);
+            throw new ValidationException("Release date cannot be earlier than " + MIN_RELEASE_DATE);
         }
         if (film.getDuration() <= 0) {
             log.error("FilmService: Validation failed: Film duration is not positive ({})", film.getDuration());
@@ -196,7 +166,7 @@ public class FilmService {
             mpaStorage.getMpaById(film.getMpa().getId())
                     .orElseThrow(() -> {
                         log.error("FilmService: Validation failed: Invalid MPA ID: {}", film.getMpa().getId());
-                        return new ValidationException("Invalid MPA ID: " + film.getMpa().getId());
+                        return new NotFoundException("MPA with ID " + film.getMpa().getId() + " not found");
                     });
         } else {
             log.error("FilmService: Validation failed: MPA object is null");
@@ -213,7 +183,7 @@ public class FilmService {
                 genreStorage.getGenreById(genre.getId())
                         .orElseThrow(() -> {
                             log.error("FilmService: Validation failed: Invalid Genre ID: {}", genre.getId());
-                            return new ValidationException("Invalid Genre ID: " + genre.getId());
+                            return new NotFoundException("Genre with ID " + genre.getId() + " not found");
                         });
             }
         }
