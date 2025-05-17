@@ -4,9 +4,10 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.ToString;
+import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.Month;
@@ -16,6 +17,9 @@ import java.util.List;
 import java.util.Set;
 
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder(toBuilder = true)
 public class Film {
     private int id;
 
@@ -27,15 +31,17 @@ public class Film {
 
     private LocalDate releaseDate;
 
+    @Builder.Default
     private List<Genre> genres = new ArrayList<>();
 
     private MPA mpa;
 
     @Positive(message = "Film duration must be positive")
     private int duration;
+
+    @Builder.Default
     private Set<User> likes = new HashSet<>();
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
+
     @JsonIgnore
-    private final LocalDate minReleaseDate = LocalDate.of(1895, Month.DECEMBER, 28);
+    public static final LocalDate MIN_RELEASE_DATE = LocalDate.of(1895, Month.DECEMBER, 28);
 }
